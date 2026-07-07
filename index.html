@@ -272,7 +272,8 @@ async function renderEquipe(){
             '<td>'+(f.data_admissao?new Date(f.data_admissao+'T12:00').toLocaleDateString('pt-BR'):'—')+'</td>'+
             '<td>'+(f.ativo?'<span class="badge badge-ativo">Ativo</span>':'<span class="badge badge-inativo">Desligado '+(f.data_desligamento?new Date(f.data_desligamento+'T12:00').toLocaleDateString('pt-BR'):'')+'</span>')+'</td>'+
             '<td style="white-space:nowrap">'+
-              (f.ativo?'<button class="btn-danger" onclick=\'abrirDesligar('+JSON.stringify(f.id)+','+JSON.stringify(f.nome)+')\'>Desligar</button>':'')+
+              (f.ativo?'<button class="btn-danger" onclick=\'abrirDesligar('+JSON.stringify(f.id)+','+JSON.stringify(f.nome)+')\'>Desligar</button> ':'')+
+              (meuPerfil.tipo==='master'?'<button class="btn-danger" onclick=\'excluirFuncionario('+JSON.stringify(f.id)+','+JSON.stringify(f.nome)+')\' title="Excluir (apaga também as entregas/devoluções dele)">🗑️</button>':'')+
             '</td>'+
           '</tr>'
         )).join('')+'</tbody></table>'
@@ -341,6 +342,14 @@ async function confirmarDesligamento(){
   renderEquipe();
 }
 
+async function excluirFuncionario(id, nome){
+  if(meuPerfil.tipo !== 'master'){ alert('Só o master pode excluir registros.'); return; }
+  if(!confirm('Excluir "'+nome+'" e TODO o histórico de entregas/devoluções dele? Essa ação não pode ser desfeita.')) return;
+  const { error } = await sb.from('uniformes_funcionarios').delete().eq('id', id);
+  if(error){ alert('Erro ao excluir: '+error.message); return; }
+  renderEquipe();
+}
+
 // ── ITENS DE UNIFORME ──────────────────────────────────
 async function renderItens(){
   await carregarCatalogo();
@@ -398,19 +407,33 @@ async function renderMovimentos(){
 
   if(error){ el.innerHTML = '<div class="empty">Erro: '+esc(error.message)+'</div>'; return; }
 
+  const uploadModelo = meuPerfil.tipo === 'master'
+    ? '<div style="margin-top:10px"><label style="font-size:.7rem;text-transform:uppercase;color:var(--text-light);font-weight:500">Substituir modelo (só master)</label><br>'+
+      '<input class="inp" type="file" id="mModeloArquivo" accept="application/pdf,image/*" style="margin-top:4px"> '+
+      '<button class="btn btn-sm" onclick="enviarModeloTermo()">Enviar</button>'+
+      '<div class="msg" id="modeloMsg"></div></div>'
+    : '';
+
   el.innerHTML =
+    '<div class="card" style="background:var(--creme)">'+
+      '<h2 style="margin-bottom:8px">📄 Modelo do Termo (em branco)</h2>'+
+      '<p style="font-size:.82rem;color:var(--text-light);margin-bottom:10px">Baixe, imprima na loja e colete a assinatura do colaborador antes de anexar o termo preenchido no registro abaixo.</p>'+
+      '<button class="btn-outline btn" onclick="baixarModeloTermo()">⬇ Baixar modelo</button>'+
+      uploadModelo+
+    '</div>'+
     '<div class="card">'+
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'+
         '<h2 style="margin:0">Entregas &amp; Devoluções — '+esc(lojaAtual)+'</h2>'+
         '<button class="btn" onclick="abrirNovoMovimento()">+ Registrar</button>'+
       '</div>'+
-      ((movs&&movs.length) ? '<table><thead><tr><th>Data</th><th>Colaborador</th><th>Tipo</th><th>Itens</th><th>Termo</th></tr></thead><tbody>'+
+      ((movs&&movs.length) ? '<table><thead><tr><th>Data</th><th>Colaborador</th><th>Tipo</th><th>Itens</th><th>Termo</th><th></th></tr></thead><tbody>'+
         movs.map(m => (
           '<tr><td>'+new Date(m.data+'T12:00').toLocaleDateString('pt-BR')+'</td>'+
           '<td>'+esc(m.uniformes_funcionarios?.nome||'—')+'</td>'+
           '<td>'+(m.tipo==='entrega'?'📥 Entrega':'📤 Devolução')+'</td>'+
           '<td>'+(m.uniformes_entrega_itens||[]).map(i=>esc(i.catalogo_produtos?.nome)+' ('+i.quantidade+')').join(', ')+'</td>'+
           '<td>'+(m.termo_path?'<button class="btn-outline btn btn-sm" onclick=\'baixarTermo('+JSON.stringify(m.termo_path)+')\'>Ver termo</button>':'<span style="color:var(--text-light);font-size:.75rem">sem arquivo</span>')+'</td>'+
+          '<td>'+(meuPerfil.tipo==='master'?'<button class="btn-danger" onclick=\'excluirMovimento('+JSON.stringify(m.id)+','+JSON.stringify(m.termo_path)+')\' title="Excluir registro">🗑️</button>':'')+'</td>'+
           '</tr>'
         )).join('')+'</tbody></table>'
       : '<div class="empty">Nenhum registro ainda.</div>')+
@@ -419,10 +442,34 @@ async function renderMovimentos(){
   window._funcsAtivos = funcs||[];
 }
 
-function abrirNovoMovimento(){
+async function baixarModeloTermo(){
+  const { data: arquivos, error: listErr } = await sb.storage.from('uniformes-termos').list('_modelos');
+  const encontrado = (arquivos||[]).find(a => a.name.startsWith('termo-uniforme'));
+  if(listErr || !encontrado){ alert('O modelo ainda não foi enviado pelo administrador.'); return; }
+  const { data, error } = await sb.storage.from('uniformes-termos').createSignedUrl('_modelos/'+encontrado.name, 300);
+  if(error){ alert('Erro ao abrir o modelo: '+error.message); return; }
+  window.open(data.signedUrl, '_blank');
+}
+
+async function enviarModeloTermo(){
+  const arquivo = $('mModeloArquivo').files[0];
+  if(!arquivo){ showMsg('modeloMsg','Selecione um arquivo.','err'); return; }
+  const { data: antigos } = await sb.storage.from('uniformes-termos').list('_modelos');
+  const paraRemover = (antigos||[]).filter(a => a.name.startsWith('termo-uniforme')).map(a => '_modelos/'+a.name);
+  if(paraRemover.length) await sb.storage.from('uniformes-termos').remove(paraRemover);
+  const ext = arquivo.name.split('.').pop();
+  const { error } = await sb.storage.from('uniformes-termos').upload('_modelos/termo-uniforme.'+ext, arquivo, { upsert: true });
+  if(error){ showMsg('modeloMsg','Erro: '+error.message,'err'); return; }
+  showMsg('modeloMsg','Modelo atualizado!','ok');
+}
+
+let saldoFuncionarioAtual = {}; // produto_id -> saldo atual (para bloquear devolução acima do que foi entregue)
+
+async function abrirNovoMovimento(){
   const sel = $('mFuncionario');
   sel.innerHTML = (window._funcsAtivos||[]).map(f=>'<option value="'+f.id+'">'+esc(f.nome)+'</option>').join('');
   if(!sel.innerHTML){ alert('Cadastre um colaborador ativo nesta loja antes de registrar entrega/devolução.'); return; }
+  sel.onchange = carregarSaldoFuncionarioSelecionado;
   tipoMovimentoAtual = 'entrega';
   document.querySelectorAll('#modalMovimento .chip-tipo button').forEach((b,i)=>b.classList.toggle('active', i===0));
   $('mData').value = new Date().toISOString().slice(0,10);
@@ -432,6 +479,15 @@ function abrirNovoMovimento(){
   $('mObs').value = '';
   showMsg('movMsg','','');
   $('modalMovimento').classList.add('show');
+  await carregarSaldoFuncionarioSelecionado();
+}
+
+async function carregarSaldoFuncionarioSelecionado(){
+  const funcionario_id = $('mFuncionario').value;
+  saldoFuncionarioAtual = {};
+  if(!funcionario_id) return;
+  const { data } = await sb.from('vw_uniformes_saldo').select('produto_id,saldo').eq('funcionario_id', funcionario_id);
+  (data||[]).forEach(s => { saldoFuncionarioAtual[s.produto_id] = s.saldo; });
 }
 
 function setTipoMov(tipo, btn){
@@ -459,6 +515,20 @@ async function salvarMovimento(){
     quantidade: parseInt(l.querySelector('.item-qtd').value) || 0,
   })).filter(l => l.quantidade > 0);
   if(!linhas.length){ showMsg('movMsg','Adicione ao menos uma peça com quantidade válida.','err'); return; }
+
+  const arquivoCheck = $('mArquivo').files[0];
+  if(!arquivoCheck){ showMsg('movMsg','Anexe o termo assinado (foto ou PDF) — é obrigatório para registrar entrega ou devolução.','err'); return; }
+
+  if(tipoMovimentoAtual === 'devolucao'){
+    for(const l of linhas){
+      const disponivel = saldoFuncionarioAtual[l.produto_id] || 0;
+      if(l.quantidade > disponivel){
+        const nomeProduto = catalogoUniformes.find(p=>p.id===l.produto_id)?.nome || 'item';
+        showMsg('movMsg','Não é possível devolver '+l.quantidade+' de "'+nomeProduto+'" — o colaborador tem apenas '+disponivel+' em posse.','err');
+        return;
+      }
+    }
+  }
 
   const btn = $('btnSalvarMov');
   btn.disabled = true; btn.textContent = 'Salvando…';
@@ -495,6 +565,15 @@ async function baixarTermo(path){
   const { data, error } = await sb.storage.from('uniformes-termos').createSignedUrl(path, 300);
   if(error){ alert('Erro ao abrir o arquivo: '+error.message); return; }
   window.open(data.signedUrl, '_blank');
+}
+
+async function excluirMovimento(id, termoPath){
+  if(meuPerfil.tipo !== 'master'){ alert('Só o master pode excluir registros.'); return; }
+  if(!confirm('Excluir este registro de entrega/devolução? Essa ação não pode ser desfeita.')) return;
+  const { error } = await sb.from('uniformes_entregas').delete().eq('id', id);
+  if(error){ alert('Erro ao excluir: '+error.message); return; }
+  if(termoPath){ await sb.storage.from('uniformes-termos').remove([termoPath]); }
+  renderMovimentos();
 }
 
 // ── PENDÊNCIAS ──────────────────────────────────────────
