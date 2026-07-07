@@ -163,6 +163,7 @@
   <div class="modal">
     <h3>Novo Item de Uniforme</h3>
     <div class="field" style="margin-bottom:10px"><label>Nome (ex: Polo M, Calça G)</label><input class="inp" id="iNome"></div>
+    <div class="field" style="margin-bottom:10px"><label>Valor Unitário (R$) — opcional, dá pra editar depois</label><input class="inp" type="number" step="0.01" min="0" id="iValor" placeholder="0,00"></div>
     <div class="msg" id="itemMsg"></div>
     <div class="modal-actions"><button class="btn" onclick="salvarItem()">Criar</button></div>
     <button class="modal-close" onclick="fecharModal('modalItem')">Cancelar</button>
@@ -329,6 +330,14 @@ async function salvarFuncionario(){
 
 let pendenciasParaDesligar = [];
 
+function precoDoProduto(produto_id){
+  const p = catalogoUniformes.find(x=>x.id===produto_id);
+  return (p && p.valor_unitario != null) ? Number(p.valor_unitario) : null;
+}
+function formatarMoeda(v){
+  return v.toLocaleString('pt-BR', { style:'currency', currency:'BRL' });
+}
+
 async function abrirDesligar(id, nome){
   funcionarioParaDesligar = id;
   $('desligarNome').textContent = nome;
@@ -339,8 +348,10 @@ async function abrirDesligar(id, nome){
   const { data } = await sb.from('vw_uniformes_saldo').select('*').eq('funcionario_id', id).gt('saldo',0);
   pendenciasParaDesligar = data || [];
   if(pendenciasParaDesligar.length){
+    const totalEstimado = pendenciasParaDesligar.reduce((s,d)=>s+(precoDoProduto(d.produto_id)||0)*d.saldo,0);
     $('desligarPendencias').innerHTML = '<div class="msg show err" style="background:#FDEDEC;padding:10px;border-radius:8px">⚠️ Pendências encontradas — ao confirmar, você poderá gerar o relatório e o e-mail pronto para o time de rescisão:<ul style="margin:6px 0 0 18px">'+
-      pendenciasParaDesligar.map(d=>'<li>'+esc(d.produto_nome)+': '+d.saldo+'</li>').join('')+'</ul></div>';
+      pendenciasParaDesligar.map(d=>'<li>'+esc(d.produto_nome)+': '+d.saldo+(precoDoProduto(d.produto_id)!=null?' — '+formatarMoeda(precoDoProduto(d.produto_id)*d.saldo):' <em>(sem valor cadastrado)</em>')+'</li>').join('')+'</ul>'+
+      (totalEstimado>0?'<div style="margin-top:8px;font-weight:600">Total estimado: '+formatarMoeda(totalEstimado)+'</div>':'')+'</div>';
   } else {
     $('desligarPendencias').innerHTML = '<div class="msg show ok">✅ Sem pendências de uniforme.</div>';
   }
@@ -368,18 +379,28 @@ async function confirmarDesligamento(){
 function abrirRelatorioPendencia(nome, dataDesligamento, pendencias){
   const loja = lojaAtual;
   const dataFmt = new Date(dataDesligamento+'T12:00').toLocaleDateString('pt-BR');
-  const listaTexto = pendencias.map(p => '- '+p.produto_nome+': '+p.saldo+' peça(s)').join('\n');
+  let totalGeral = 0;
+  let temItemSemValor = false;
+  const listaTexto = pendencias.map(p => {
+    const preco = precoDoProduto(p.produto_id);
+    if(preco == null){ temItemSemValor = true; return '- '+p.produto_nome+': '+p.saldo+' peça(s) (valor não cadastrado)'; }
+    const subtotal = preco * p.saldo;
+    totalGeral += subtotal;
+    return '- '+p.produto_nome+': '+p.saldo+' peça(s) x '+formatarMoeda(preco)+' = '+formatarMoeda(subtotal);
+  }).join('\n');
+  const linhaTotal = 'Valor total a descontar: '+formatarMoeda(totalGeral)+(temItemSemValor?' (+ itens sem valor cadastrado, verificar manualmente)':'');
   const assunto = 'Pendência de uniforme — desligamento de '+nome+' ('+loja+')';
   const corpo = 'Prezados,\n\n'+
     'Informamos o desligamento do(a) colaborador(a) '+nome+', da loja '+loja+', em '+dataFmt+'.\n\n'+
     'Segue anexo o relatório de uniformes não devolvidos, para providências quanto ao desconto na rescisão:\n\n'+
     listaTexto+'\n\n'+
+    linhaTotal+'\n\n'+
     'Atenciosamente,\n'+(meuPerfil.nome||'');
 
   $('relatorioDestinatario').textContent = 'rescisao@commcenter.com.br';
   $('relatorioAssunto').value = assunto;
   $('relatorioCorpo').value = corpo;
-  window._relatorioDados = { nome, loja, dataFmt, pendencias };
+  window._relatorioDados = { nome, loja, dataFmt, pendencias, totalGeral, temItemSemValor };
   $('modalRelatorioPendencia').classList.add('show');
 }
 
@@ -396,7 +417,7 @@ function copiarCampo(id, btn){
 function baixarRelatorioPendenciaPDF(){
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
-  const { nome, loja, dataFmt, pendencias } = window._relatorioDados;
+  const { nome, loja, dataFmt, pendencias, totalGeral, temItemSemValor } = window._relatorioDados;
 
   doc.setFontSize(16);
   doc.text('Relatório de Pendência de Uniformes', 14, 20);
@@ -408,10 +429,20 @@ function baixarRelatorioPendenciaPDF(){
 
   doc.autoTable({
     startY: 62,
-    head: [['Peça', 'Quantidade Pendente']],
-    body: pendencias.map(p => [p.produto_nome, String(p.saldo)]),
+    head: [['Peça', 'Qtd. Pendente', 'Valor Unit.', 'Subtotal']],
+    body: pendencias.map(p => {
+      const preco = precoDoProduto(p.produto_id);
+      return [p.produto_nome, String(p.saldo), preco!=null?formatarMoeda(preco):'—', preco!=null?formatarMoeda(preco*p.saldo):'—'];
+    }),
     headStyles: { fillColor: [107,30,46] },
+    foot: [['', '', 'TOTAL', formatarMoeda(totalGeral)]],
+    footStyles: { fillColor: [237,228,212], textColor: [44,24,16], fontStyle: 'bold' },
   });
+
+  if(temItemSemValor){
+    doc.setFontSize(9);
+    doc.text('* Um ou mais itens sem valor unitário cadastrado — verificar manualmente.', 14, doc.lastAutoTable.finalY + 8);
+  }
 
   doc.save('pendencia-uniforme-'+nome.replace(/\s+/g,'-').toLowerCase()+'.pdf');
 }
@@ -434,10 +465,11 @@ async function renderItens(){
         '<h2 style="margin:0">Itens de Uniforme (catálogo compartilhado com Pedidos-Fábrica)</h2>'+
         '<button class="btn" onclick="abrirNovoItem()">+ Novo Item</button>'+
       '</div>'+
-      (catalogoUniformes.length ? '<table><thead><tr><th>Nome</th><th>Status</th><th></th></tr></thead><tbody>'+
+      (catalogoUniformes.length ? '<table><thead><tr><th>Nome</th><th>Valor Unit. (R$)</th><th>Status</th><th></th></tr></thead><tbody>'+
         catalogoUniformes.map(p => (
           '<tr class="'+(p.ativo?'':'inativo')+'">'+
             '<td>'+esc(p.nome)+'</td>'+
+            '<td><input class="inp" type="number" step="0.01" min="0" style="max-width:110px" value="'+(p.valor_unitario??'')+'" placeholder="0,00" onblur="salvarValorItem('+JSON.stringify(p.id)+',this.value)"></td>'+
             '<td>'+(p.ativo?'<span class="badge badge-ativo">Ativo</span>':'<span class="badge badge-inativo">Inativo</span>')+'</td>'+
             '<td style="white-space:nowrap">'+
               '<button class="btn-outline btn btn-sm" onclick=\'toggleAtivoItem('+JSON.stringify(p.id)+','+(!p.ativo)+')\'>'+(p.ativo?'Desativar':'Ativar')+'</button> '+
@@ -449,12 +481,20 @@ async function renderItens(){
     '</div>';
 }
 
-function abrirNovoItem(){ $('iNome').value=''; showMsg('itemMsg','',''); $('modalItem').classList.add('show'); }
+async function salvarValorItem(id, valor){
+  const num = valor === '' ? null : parseFloat(valor);
+  await sb.from('catalogo_produtos').update({ valor_unitario: num }).eq('id', id);
+  const item = catalogoUniformes.find(p=>p.id===id);
+  if(item) item.valor_unitario = num;
+}
+
+function abrirNovoItem(){ $('iNome').value=''; $('iValor').value=''; showMsg('itemMsg','',''); $('modalItem').classList.add('show'); }
 
 async function salvarItem(){
   const nome = $('iNome').value.trim();
   if(!nome){ showMsg('itemMsg','Informe o nome do item.','err'); return; }
-  const { error } = await sb.from('catalogo_produtos').insert({ nome, categoria:'Uniforme', ativo:true });
+  const valorRaw = $('iValor').value;
+  const { error } = await sb.from('catalogo_produtos').insert({ nome, categoria:'Uniforme', ativo:true, valor_unitario: valorRaw===''?null:parseFloat(valorRaw) });
   if(error){ showMsg('itemMsg','Erro: '+error.message,'err'); return; }
   fecharModal('modalItem');
   renderItens();
