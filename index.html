@@ -136,6 +136,28 @@
   </div>
 </div>
 
+<!-- MODAL: Relatório de pendência (desligamento) -->
+<div class="modal-overlay" id="modalRelatorioPendencia">
+  <div class="modal" style="max-width:600px">
+    <h3>⚠️ Enviar Pendência ao Time de Rescisão</h3>
+    <p style="font-size:.85rem;color:var(--text-light);margin-bottom:14px">
+      1) Baixe o relatório em PDF. 2) Copie o e-mail abaixo e cole no seu app de e-mail, para
+      <strong id="relatorioDestinatario"></strong>. 3) Anexe o PDF baixado antes de enviar.
+    </p>
+    <button class="btn" style="margin-bottom:16px" onclick="baixarRelatorioPendenciaPDF()">⬇ Baixar Relatório em PDF</button>
+
+    <div class="field" style="margin-bottom:10px">
+      <label>Assunto <button type="button" class="btn-outline btn btn-sm" style="float:right;padding:2px 10px" onclick="copiarCampo('relatorioAssunto',this)">Copiar</button></label>
+      <input class="inp" id="relatorioAssunto" readonly>
+    </div>
+    <div class="field">
+      <label>Corpo do e-mail <button type="button" class="btn-outline btn btn-sm" style="float:right;padding:2px 10px" onclick="copiarCampo('relatorioCorpo',this)">Copiar</button></label>
+      <textarea class="inp" id="relatorioCorpo" rows="10" readonly></textarea>
+    </div>
+    <button class="modal-close" onclick="fecharModal('modalRelatorioPendencia')">Fechar</button>
+  </div>
+</div>
+
 <!-- MODAL: Novo item de uniforme -->
 <div class="modal-overlay" id="modalItem">
   <div class="modal">
@@ -175,6 +197,8 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script>
 const SUPABASE_URL = 'https://pbuhwpcpdcnaheaywmdv.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBidWh3cGNwZGNuYWhlYXl3bWR2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYyNjU5MzksImV4cCI6MjA5MTg0MTkzOX0.Mg4PVg96ZiV3C2Rn0GLQU9c7ui_41OlU6Ldqn5jcvyY';
@@ -303,6 +327,8 @@ async function salvarFuncionario(){
   renderEquipe();
 }
 
+let pendenciasParaDesligar = [];
+
 async function abrirDesligar(id, nome){
   funcionarioParaDesligar = id;
   $('desligarNome').textContent = nome;
@@ -311,9 +337,10 @@ async function abrirDesligar(id, nome){
   $('desligarPendencias').innerHTML = '<div class="loading" style="padding:10px">Verificando pendências…</div>';
   $('modalDesligar').classList.add('show');
   const { data } = await sb.from('vw_uniformes_saldo').select('*').eq('funcionario_id', id).gt('saldo',0);
-  if(data && data.length){
-    $('desligarPendencias').innerHTML = '<div class="msg show err" style="background:#FDEDEC;padding:10px;border-radius:8px">⚠️ Pendências encontradas — um e-mail de aviso será enviado:<ul style="margin:6px 0 0 18px">'+
-      data.map(d=>'<li>'+esc(d.produto_nome)+': '+d.saldo+'</li>').join('')+'</ul></div>';
+  pendenciasParaDesligar = data || [];
+  if(pendenciasParaDesligar.length){
+    $('desligarPendencias').innerHTML = '<div class="msg show err" style="background:#FDEDEC;padding:10px;border-radius:8px">⚠️ Pendências encontradas — ao confirmar, você poderá gerar o relatório e o e-mail pronto para o time de rescisão:<ul style="margin:6px 0 0 18px">'+
+      pendenciasParaDesligar.map(d=>'<li>'+esc(d.produto_nome)+': '+d.saldo+'</li>').join('')+'</ul></div>';
   } else {
     $('desligarPendencias').innerHTML = '<div class="msg show ok">✅ Sem pendências de uniforme.</div>';
   }
@@ -322,24 +349,71 @@ async function abrirDesligar(id, nome){
 async function confirmarDesligamento(){
   const btn = $('btnDesligar');
   btn.disabled = true; btn.textContent = 'Processando…';
+  const dataDesligamento = $('fDesligamento').value || new Date().toISOString().slice(0,10);
   const { error } = await sb.from('uniformes_funcionarios').update({
-    ativo: false, data_desligamento: $('fDesligamento').value || new Date().toISOString().slice(0,10),
+    ativo: false, data_desligamento: dataDesligamento,
   }).eq('id', funcionarioParaDesligar);
   if(error){ showMsg('desligarMsg','Erro: '+error.message,'err'); btn.disabled=false; btn.textContent='Confirmar Desligamento'; return; }
 
-  // Dispara checagem/e-mail de pendência (silenciosa — não bloqueia o fluxo se falhar)
-  try{
-    const { data: { session } } = await sb.auth.getSession();
-    await fetch(SUPABASE_URL+'/functions/v1/uniformes-notificar-desligamento', {
-      method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},
-      body: JSON.stringify({ funcionario_id: funcionarioParaDesligar }),
-    });
-  }catch(e){ console.error('Falha ao notificar:', e); }
-
+  const nome = $('desligarNome').textContent;
   btn.disabled = false; btn.textContent = 'Confirmar Desligamento';
   fecharModal('modalDesligar');
   renderEquipe();
+
+  if(pendenciasParaDesligar.length){
+    abrirRelatorioPendencia(nome, dataDesligamento, pendenciasParaDesligar);
+  }
+}
+
+function abrirRelatorioPendencia(nome, dataDesligamento, pendencias){
+  const loja = lojaAtual;
+  const dataFmt = new Date(dataDesligamento+'T12:00').toLocaleDateString('pt-BR');
+  const listaTexto = pendencias.map(p => '- '+p.produto_nome+': '+p.saldo+' peça(s)').join('\n');
+  const assunto = 'Pendência de uniforme — desligamento de '+nome+' ('+loja+')';
+  const corpo = 'Prezados,\n\n'+
+    'Informamos o desligamento do(a) colaborador(a) '+nome+', da loja '+loja+', em '+dataFmt+'.\n\n'+
+    'Segue anexo o relatório de uniformes não devolvidos, para providências quanto ao desconto na rescisão:\n\n'+
+    listaTexto+'\n\n'+
+    'Atenciosamente,\n'+(meuPerfil.nome||'');
+
+  $('relatorioDestinatario').textContent = 'rescisao@commcenter.com.br';
+  $('relatorioAssunto').value = assunto;
+  $('relatorioCorpo').value = corpo;
+  window._relatorioDados = { nome, loja, dataFmt, pendencias };
+  $('modalRelatorioPendencia').classList.add('show');
+}
+
+function copiarCampo(id, btn){
+  const el = $(id);
+  el.select();
+  navigator.clipboard.writeText(el.value).then(()=>{
+    const original = btn.textContent;
+    btn.textContent = 'Copiado!';
+    setTimeout(()=>btn.textContent=original, 1500);
+  });
+}
+
+function baixarRelatorioPendenciaPDF(){
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  const { nome, loja, dataFmt, pendencias } = window._relatorioDados;
+
+  doc.setFontSize(16);
+  doc.text('Relatório de Pendência de Uniformes', 14, 20);
+  doc.setFontSize(11);
+  doc.text('Colaborador: '+nome, 14, 32);
+  doc.text('Loja: '+loja, 14, 39);
+  doc.text('Data de Desligamento: '+dataFmt, 14, 46);
+  doc.text('Emitido em: '+new Date().toLocaleDateString('pt-BR')+' às '+new Date().toLocaleTimeString('pt-BR'), 14, 53);
+
+  doc.autoTable({
+    startY: 62,
+    head: [['Peça', 'Quantidade Pendente']],
+    body: pendencias.map(p => [p.produto_nome, String(p.saldo)]),
+    headStyles: { fillColor: [107,30,46] },
+  });
+
+  doc.save('pendencia-uniforme-'+nome.replace(/\s+/g,'-').toLowerCase()+'.pdf');
 }
 
 async function excluirFuncionario(id, nome){
