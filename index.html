@@ -262,7 +262,10 @@ async function verificarAcessoEIniciar(){
   else if (perfil.loja) minhasLojas = [perfil.loja];
   else minhasLojas = [];
 
-  if (perfil.tipo === 'uniformes_backoffice') minhasLojas = [...TODAS_LOJAS]; // não usa loja, mas evita quebrar o seletor
+  souBackoffice = perfil.uniformes_backoffice === true;
+  const temPapelDeGerente = ['loja','master_loja','master'].includes(perfil.tipo);
+
+  if (souBackoffice && !minhasLojas.length) minhasLojas = [...TODAS_LOJAS]; // backoffice puro não tem loja própria
 
   if (!minhasLojas.length){
     document.getElementById('carregandoOverlay').textContent = 'Nenhuma loja vinculada ao seu usuário. Fale com o administrador.';
@@ -275,13 +278,12 @@ async function verificarAcessoEIniciar(){
 
   if (perfil.tipo !== 'master') $('tabItens').remove();
 
-  souBackoffice = perfil.tipo === 'uniformes_backoffice';
   if (perfil.tipo === 'master' || souBackoffice) {
     $('tabInventario').style.display = '';
     $('tabTriagem').style.display = '';
   }
-  if (souBackoffice) {
-    // Backoffice não faz gestão de equipe/itens/entregas — só inventário e triagem
+  if (souBackoffice && !temPapelDeGerente) {
+    // Backoffice puro (sem papel de gerente de loja) — só inventário e triagem
     $('tabEquipe').remove(); $('tabMovimentos').remove(); $('tabPendencias').remove();
     $('seletorLoja').closest('.field').style.display = 'none';
     currentTab = 'inventario';
