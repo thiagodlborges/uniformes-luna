@@ -234,6 +234,13 @@ const TODAS_LOJAS = ['Esplanada','Cianê','Tucuruvi','Indaiatuba','Jundiaí','Pr
 let meuPerfil = null;
 let minhasLojas = [];
 let lojaAtual = null;
+const LOJA_PARA_SLUG = {
+  'Esplanada':'esplanada','Cianê':'ciane','Tucuruvi':'tucuruvi','Indaiatuba':'indaiatuba','Jundiaí':'jundiai',
+  'Praça da Moça - Diadema':'praca-da-moca-diadema','Buriti Mogi Guaçu':'buriti-mogi-guacu','SP Market':'sp-market',
+  'Iguatemi Campinas':'iguatemi-campinas','Shopping Itaquera':'shopping-itaquera','Atrium':'atrium',
+};
+function slugDaLoja(loja){ return LOJA_PARA_SLUG[loja] || loja.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-'); }
+
 let currentTab = 'equipe';
 let souBackoffice = false;
 let catalogoUniformes = [];
@@ -695,7 +702,7 @@ async function salvarMovimento(){
   const arquivo = $('mArquivo').files[0];
   if(arquivo){
     const ext = arquivo.name.split('.').pop();
-    const path = lojaAtual+'/'+funcionario_id+'/'+Date.now()+'.'+ext;
+    const path = slugDaLoja(lojaAtual)+'/'+funcionario_id+'/'+Date.now()+'.'+ext;
     const { error: upErr } = await sb.storage.from('uniformes-termos').upload(path, arquivo);
     if(upErr){ showMsg('movMsg','Erro ao enviar arquivo: '+upErr.message,'err'); btn.disabled=false; btn.textContent='Salvar'; return; }
     termo_path = path; termo_nome_original = arquivo.name;
