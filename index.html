@@ -203,12 +203,12 @@
 <div class="modal-overlay" id="modalTriagem">
   <div class="modal">
     <h3>Classificar: <span id="triagemProduto"></span></h3>
-    <input type="hidden" id="triagemDestinoAtual" value="reaproveitar">
-    <label style="font-size:.7rem;text-transform:uppercase;color:var(--text-light);font-weight:500">Destino</label>
-    <div class="chip-tipo" style="margin-top:6px">
-      <button type="button" class="active" onclick="setDestinoTriagem('reaproveitar',this)">♻️ Reaproveitar</button>
-      <button type="button" onclick="setDestinoTriagem('descarte',this)">🗑️ Descartar</button>
-    </div>
+    <p style="font-size:.82rem;color:var(--text-light);margin-bottom:10px">Quantidade devolvida pendente: <b id="triagemQtdTotal"></b></p>
+
+    <label style="font-size:.7rem;text-transform:uppercase;color:var(--text-light);font-weight:500">Quantas peças vão para reaproveitamento?</label>
+    <input class="inp" type="number" id="triagemQtdReaproveitar" min="0" step="1" oninput="onTriagemQtdChange()" style="margin-top:6px">
+    <p style="font-size:.78rem;color:var(--text-light);margin:6px 0 0 0">O restante (<b id="triagemQtdDescarteLabel">0</b>) será descartado.</p>
+
     <div id="triagemMotivoWrap" style="display:none;margin-top:12px">
       <label style="font-size:.7rem;text-transform:uppercase;color:var(--text-light);font-weight:500">Motivo do descarte (obrigatório)</label>
       <textarea class="inp" id="triagemMotivo" rows="3" placeholder="Ex: manchado, rasgado, desgaste excessivo..." style="margin-top:6px"></textarea>
@@ -833,39 +833,46 @@ function abrirTriagem(entrega_item_id, produtoNome, quantidade){
   triagemProdutoNomeAtual = produtoNome;
   triagemQuantidadeAtual = quantidade;
   $('triagemProduto').textContent = produtoNome;
-  document.querySelectorAll('#modalTriagem .chip-tipo button').forEach((b,i)=>b.classList.toggle('active', i===0));
-  $('triagemDestinoAtual').value = 'reaproveitar';
-  $('triagemMotivoWrap').style.display = 'none';
-  $('triagemMotivo').value = '';
+  $('triagemQtdTotal').textContent = quantidade;
+  $('triagemQtdReaproveitar').max = quantidade;
+  $('triagemQtdReaproveitar').value = quantidade;
+  onTriagemQtdChange();
   showMsg('triagemMsg','','');
   $('modalTriagem').classList.add('show');
 }
 
-function setDestinoTriagem(destino, btn){
-  $('triagemDestinoAtual').value = destino;
-  document.querySelectorAll('#modalTriagem .chip-tipo button').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active');
-  $('triagemMotivoWrap').style.display = destino==='descarte' ? 'block' : 'none';
+function onTriagemQtdChange(){
+  let qtd = parseInt($('triagemQtdReaproveitar').value);
+  if(isNaN(qtd) || qtd < 0) qtd = 0;
+  if(qtd > triagemQuantidadeAtual) qtd = triagemQuantidadeAtual;
+  $('triagemQtdReaproveitar').value = qtd;
+  const descarte = triagemQuantidadeAtual - qtd;
+  $('triagemQtdDescarteLabel').textContent = descarte;
+  $('triagemMotivoWrap').style.display = descarte > 0 ? 'block' : 'none';
 }
 
 async function salvarTriagem(){
-  const destino = $('triagemDestinoAtual').value;
+  const qtdReaproveitar = parseInt($('triagemQtdReaproveitar').value) || 0;
+  const qtdDescarte = triagemQuantidadeAtual - qtdReaproveitar;
   const motivo = $('triagemMotivo').value.trim();
-  if(destino==='descarte' && !motivo){ showMsg('triagemMsg','Informe o motivo do descarte.','err'); return; }
+  if(qtdDescarte > 0 && !motivo){ showMsg('triagemMsg','Informe o motivo do descarte.','err'); return; }
+  if(qtdReaproveitar === 0 && qtdDescarte === 0){ showMsg('triagemMsg','Informe uma quantidade v\u00e1lida.','err'); return; }
 
-  const { error } = await sb.from('uniformes_triagem').insert({
-    entrega_item_id: triagemItemAtual, destino, motivo_descarte: destino==='descarte'?motivo:null, triado_por: meuPerfil.id,
-  });
+  const linhas = [];
+  if(qtdReaproveitar > 0) linhas.push({ entrega_item_id: triagemItemAtual, destino:'reaproveitar', quantidade:qtdReaproveitar, triado_por: meuPerfil.id });
+  if(qtdDescarte > 0) linhas.push({ entrega_item_id: triagemItemAtual, destino:'descarte', quantidade:qtdDescarte, motivo_descarte: motivo, triado_por: meuPerfil.id });
+
+  const { error } = await sb.from('uniformes_triagem').insert(linhas);
   if(error){ showMsg('triagemMsg','Erro: '+error.message,'err'); return; }
 
-  if(destino === 'reaproveitar'){
+  if(qtdReaproveitar > 0){
     try{
       const { data: { session } } = await sb.auth.getSession();
       if(!session){ showMsg('triagemMsg','Classificado, mas sess\u00e3o expirou antes de enviar ao Estoque CD. Recarregue a p\u00e1gina e verifique manualmente.','err'); await new Promise(res=>setTimeout(res,3000)); fecharModal('modalTriagem'); renderTriagem(); return; }
       const r = await fetch(SUPABASE_URL+'/functions/v1/uniformes-registrar-reaproveitamento', {
         method:'POST',
         headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},
-        body: JSON.stringify({ produto_nome: triagemProdutoNomeAtual, quantidade: triagemQuantidadeAtual }),
+        body: JSON.stringify({ produto_nome: triagemProdutoNomeAtual, quantidade: qtdReaproveitar }),
       });
       const d = await r.json();
       if(!d.ok){
