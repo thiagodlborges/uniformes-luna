@@ -102,7 +102,7 @@
 
 <nav class="tabs">
   <div class="tab active" data-tab="equipe" onclick="mudarTab('equipe')">👤 Equipe</div>
-  <div class="tab" data-tab="itens" onclick="mudarTab('itens')">👕 Itens de Uniforme</div>
+  <div class="tab" id="tabItens" data-tab="itens" onclick="mudarTab('itens')">👕 Itens de Uniforme</div>
   <div class="tab" data-tab="movimentos" onclick="mudarTab('movimentos')">📋 Entregas &amp; Devoluções</div>
   <div class="tab" data-tab="pendencias" onclick="mudarTab('pendencias')">⚠️ Pendências</div>
 </nav>
@@ -247,6 +247,8 @@ async function verificarAcessoEIniciar(){
   const sel = $('seletorLoja');
   sel.innerHTML = minhasLojas.map(l => '<option value="'+esc(l)+'">'+esc(l)+'</option>').join('');
   lojaAtual = minhasLojas[0];
+
+  if (perfil.tipo !== 'master') $('tabItens').remove();
 
   document.getElementById('appRoot').style.display = 'block';
   document.getElementById('carregandoOverlay').remove();
