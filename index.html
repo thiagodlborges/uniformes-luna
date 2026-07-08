@@ -101,10 +101,12 @@
 </header>
 
 <nav class="tabs">
-  <div class="tab active" data-tab="equipe" onclick="mudarTab('equipe')">👤 Equipe</div>
+  <div class="tab active" id="tabEquipe" data-tab="equipe" onclick="mudarTab('equipe')">👤 Equipe</div>
   <div class="tab" id="tabItens" data-tab="itens" onclick="mudarTab('itens')">👕 Itens de Uniforme</div>
-  <div class="tab" data-tab="movimentos" onclick="mudarTab('movimentos')">📋 Entregas &amp; Devoluções</div>
-  <div class="tab" data-tab="pendencias" onclick="mudarTab('pendencias')">⚠️ Pendências</div>
+  <div class="tab" id="tabMovimentos" data-tab="movimentos" onclick="mudarTab('movimentos')">📋 Entregas &amp; Devoluções</div>
+  <div class="tab" id="tabPendencias" data-tab="pendencias" onclick="mudarTab('pendencias')">⚠️ Pendências</div>
+  <div class="tab" id="tabInventario" style="display:none" data-tab="inventario" onclick="mudarTab('inventario')">📦 Inventário Geral</div>
+  <div class="tab" id="tabTriagem" style="display:none" data-tab="triagem" onclick="mudarTab('triagem')">✅ Recebimento &amp; Triagem</div>
 </nav>
 
 <main id="mainContent"><div class="loading">Carregando…</div></main>
@@ -197,6 +199,26 @@
   </div>
 </div>
 
+<!-- MODAL: Classificar triagem -->
+<div class="modal-overlay" id="modalTriagem">
+  <div class="modal">
+    <h3>Classificar: <span id="triagemProduto"></span></h3>
+    <input type="hidden" id="triagemDestinoAtual" value="reaproveitar">
+    <label style="font-size:.7rem;text-transform:uppercase;color:var(--text-light);font-weight:500">Destino</label>
+    <div class="chip-tipo" style="margin-top:6px">
+      <button type="button" class="active" onclick="setDestinoTriagem('reaproveitar',this)">♻️ Reaproveitar</button>
+      <button type="button" onclick="setDestinoTriagem('descarte',this)">🗑️ Descartar</button>
+    </div>
+    <div id="triagemMotivoWrap" style="display:none;margin-top:12px">
+      <label style="font-size:.7rem;text-transform:uppercase;color:var(--text-light);font-weight:500">Motivo do descarte (obrigatório)</label>
+      <textarea class="inp" id="triagemMotivo" rows="3" placeholder="Ex: manchado, rasgado, desgaste excessivo..." style="margin-top:6px"></textarea>
+    </div>
+    <div class="msg" id="triagemMsg"></div>
+    <div class="modal-actions"><button class="btn" onclick="salvarTriagem()">Salvar Classificação</button></div>
+    <button class="modal-close" onclick="fecharModal('modalTriagem')">Cancelar</button>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
@@ -213,6 +235,7 @@ let meuPerfil = null;
 let minhasLojas = [];
 let lojaAtual = null;
 let currentTab = 'equipe';
+let souBackoffice = false;
 let catalogoUniformes = [];
 let funcionarioParaDesligar = null;
 let tipoMovimentoAtual = 'entrega';
@@ -250,6 +273,19 @@ async function verificarAcessoEIniciar(){
 
   if (perfil.tipo !== 'master') $('tabItens').remove();
 
+  souBackoffice = perfil.tipo === 'uniformes_backoffice';
+  if (perfil.tipo === 'master' || souBackoffice) {
+    $('tabInventario').style.display = '';
+    $('tabTriagem').style.display = '';
+  }
+  if (souBackoffice) {
+    // Backoffice não faz gestão de equipe/itens/entregas — só inventário e triagem
+    $('tabEquipe').remove(); $('tabMovimentos').remove(); $('tabPendencias').remove();
+    $('seletorLoja').closest('.field').style.display = 'none';
+    currentTab = 'inventario';
+    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab==='inventario'));
+  }
+
   document.getElementById('appRoot').style.display = 'block';
   document.getElementById('carregandoOverlay').remove();
   renderTab();
@@ -271,6 +307,8 @@ function renderTab(){
   else if(currentTab==='itens') renderItens();
   else if(currentTab==='movimentos') renderMovimentos();
   else if(currentTab==='pendencias') renderPendencias();
+  else if(currentTab==='inventario') renderInventarioGeral();
+  else if(currentTab==='triagem') renderTriagem();
 }
 
 async function carregarCatalogo(){
@@ -693,6 +731,119 @@ async function excluirMovimento(id, termoPath){
 }
 
 // ── PENDÊNCIAS ──────────────────────────────────────────
+// ── INVENTÁRIO GERAL (todas as lojas — master e backoffice) ──
+async function renderInventarioGeral(){
+  const el = $('mainContent');
+  el.innerHTML = '<div class="loading">Carregando…</div>';
+  const { data, error } = await sb.from('vw_uniformes_inventario_geral').select('*').order('loja').order('funcionario_nome');
+  if(error){ el.innerHTML = '<div class="empty">Erro: '+esc(error.message)+'</div>'; return; }
+  window._inventarioGeral = data || [];
+  renderTabelaInventario();
+}
+
+function renderTabelaInventario(){
+  const el = $('mainContent');
+  const filtro = (window._filtroInventario||'').toLowerCase();
+  const lista = (window._inventarioGeral||[]).filter(p =>
+    !filtro || p.loja.toLowerCase().includes(filtro) || p.funcionario_nome.toLowerCase().includes(filtro) || p.produto_nome.toLowerCase().includes(filtro)
+  );
+  const valorTotal = lista.reduce((s,p)=>s+(p.valor_unitario||0)*p.saldo,0);
+  el.innerHTML =
+    '<div class="card">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px">'+
+        '<h2 style="margin:0">Inventário Geral de Uniformes — Todas as Lojas</h2>'+
+        '<div style="display:flex;gap:8px">'+
+          '<input class="inp" placeholder="Buscar loja, colaborador ou peça..." style="min-width:220px" value="'+esc(window._filtroInventario||'')+'" oninput="window._filtroInventario=this.value;renderTabelaInventario()">'+
+          '<button class="btn-outline btn btn-sm" onclick="exportarInventarioCSV()">⬇ Exportar CSV</button>'+
+        '</div>'+
+      '</div>'+
+      '<div style="margin-bottom:10px;font-size:.85rem;color:var(--text-light)">Total de peças em posse: <b>'+lista.reduce((s,p)=>s+p.saldo,0)+'</b> — Valor estimado em posse: <b>'+formatarMoeda(valorTotal)+'</b></div>'+
+      (lista.length ? '<table><thead><tr><th>Loja</th><th>Colaborador</th><th>Situação</th><th>Peça</th><th>Qtd.</th><th>Valor</th></tr></thead><tbody>'+
+        lista.map(p => (
+          '<tr>'+
+            '<td>'+esc(p.loja)+'</td>'+
+            '<td>'+esc(p.funcionario_nome)+'</td>'+
+            '<td>'+(p.funcionario_ativo?'<span class="badge badge-ativo">Ativo</span>':'<span class="badge badge-pend">Desligado</span>')+'</td>'+
+            '<td>'+esc(p.produto_nome)+'</td>'+
+            '<td>'+p.saldo+'</td>'+
+            '<td>'+(p.valor_unitario!=null?formatarMoeda(p.valor_unitario*p.saldo):'—')+'</td>'+
+          '</tr>'
+        )).join('')+'</tbody></table>'
+      : '<div class="empty">Nenhuma peça em posse no momento.</div>')+
+    '</div>';
+}
+
+function exportarInventarioCSV(){
+  const lista = window._inventarioGeral||[];
+  const linhas = [['Loja','Colaborador','Situação','Peça','Quantidade','Valor Unitário','Valor Total']];
+  lista.forEach(p => linhas.push([p.loja, p.funcionario_nome, p.funcionario_ativo?'Ativo':'Desligado', p.produto_nome, p.saldo, p.valor_unitario??'', p.valor_unitario!=null?(p.valor_unitario*p.saldo).toFixed(2):'']));
+  const csv = linhas.map(l => l.map(c => '"'+String(c).replace(/"/g,'""')+'"').join(';')).join('\n');
+  const blob = new Blob(['\uFEFF'+csv], { type:'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'inventario-uniformes-'+new Date().toISOString().slice(0,10)+'.csv';
+  a.click();
+}
+
+// ── RECEBIMENTO & TRIAGEM (master e backoffice) ──
+async function renderTriagem(){
+  const el = $('mainContent');
+  el.innerHTML = '<div class="loading">Carregando…</div>';
+  const { data, error } = await sb.from('vw_uniformes_pendentes_triagem').select('*').order('data',{ascending:false});
+  if(error){ el.innerHTML = '<div class="empty">Erro: '+esc(error.message)+'</div>'; return; }
+  const lista = data || [];
+  el.innerHTML =
+    '<div class="card">'+
+      '<h2>Recebimento &amp; Triagem de Devoluções</h2>'+
+      '<p style="font-size:.82rem;color:var(--text-light);margin-bottom:14px">Peças devolvidas pelas lojas, aguardando avaliação: reaproveitar ou descartar.</p>'+
+      (lista.length ? '<table><thead><tr><th>Data</th><th>Loja</th><th>Colaborador</th><th>Peça</th><th>Qtd.</th><th>Termo</th><th>Destino</th></tr></thead><tbody>'+
+        lista.map(t => (
+          '<tr id="triagem-'+t.entrega_item_id+'">'+
+            '<td>'+new Date(t.data+'T12:00').toLocaleDateString('pt-BR')+'</td>'+
+            '<td>'+esc(t.loja)+'</td>'+
+            '<td>'+esc(t.funcionario_nome)+'</td>'+
+            '<td>'+esc(t.produto_nome)+'</td>'+
+            '<td>'+t.quantidade+'</td>'+
+            '<td>'+(t.termo_path?'<button class="btn-outline btn btn-sm" onclick=\'baixarTermo('+JSON.stringify(t.termo_path)+')\'>Ver termo</button>':'—')+'</td>'+
+            '<td><button class="btn-outline btn btn-sm" onclick=\'abrirTriagem('+JSON.stringify(t.entrega_item_id)+','+JSON.stringify(t.produto_nome)+')\'>Classificar</button></td>'+
+          '</tr>'
+        )).join('')+'</tbody></table>'
+      : '<div class="empty">Nenhuma devolução pendente de triagem no momento.</div>')+
+    '</div>';
+}
+
+let triagemItemAtual = null;
+
+function abrirTriagem(entrega_item_id, produtoNome){
+  triagemItemAtual = entrega_item_id;
+  $('triagemProduto').textContent = produtoNome;
+  document.querySelectorAll('#modalTriagem .chip-tipo button').forEach((b,i)=>b.classList.toggle('active', i===0));
+  $('triagemDestinoAtual').value = 'reaproveitar';
+  $('triagemMotivoWrap').style.display = 'none';
+  $('triagemMotivo').value = '';
+  showMsg('triagemMsg','','');
+  $('modalTriagem').classList.add('show');
+}
+
+function setDestinoTriagem(destino, btn){
+  $('triagemDestinoAtual').value = destino;
+  document.querySelectorAll('#modalTriagem .chip-tipo button').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  $('triagemMotivoWrap').style.display = destino==='descarte' ? 'block' : 'none';
+}
+
+async function salvarTriagem(){
+  const destino = $('triagemDestinoAtual').value;
+  const motivo = $('triagemMotivo').value.trim();
+  if(destino==='descarte' && !motivo){ showMsg('triagemMsg','Informe o motivo do descarte.','err'); return; }
+  const { error } = await sb.from('uniformes_triagem').insert({
+    entrega_item_id: triagemItemAtual, destino, motivo_descarte: destino==='descarte'?motivo:null, triado_por: meuPerfil.id,
+  });
+  if(error){ showMsg('triagemMsg','Erro: '+error.message,'err'); return; }
+  fecharModal('modalTriagem');
+  renderTriagem();
+}
+
 async function renderPendencias(){
   const el = $('mainContent');
   el.innerHTML = '<div class="loading">Carregando…</div>';
