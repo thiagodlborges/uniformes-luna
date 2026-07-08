@@ -262,6 +262,8 @@ async function verificarAcessoEIniciar(){
   else if (perfil.loja) minhasLojas = [perfil.loja];
   else minhasLojas = [];
 
+  if (perfil.tipo === 'uniformes_backoffice') minhasLojas = [...TODAS_LOJAS]; // não usa loja, mas evita quebrar o seletor
+
   if (!minhasLojas.length){
     document.getElementById('carregandoOverlay').textContent = 'Nenhuma loja vinculada ao seu usuário. Fale com o administrador.';
     return;
