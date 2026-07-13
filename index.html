@@ -14,6 +14,7 @@
     --text:#2C1810; --text-light:#6B4F3A; --white:#FDFAF6;
   }
   *{box-sizing:border-box;margin:0;padding:0}
+  html,body{overflow-x:hidden;max-width:100vw}
   body{font-family:'Jost',sans-serif;background:var(--creme);color:var(--text);min-height:100vh}
   a{color:inherit}
 
@@ -49,7 +50,8 @@
   .btn-danger{background:none;border:none;color:#B43C3C;cursor:pointer;font-size:.85rem}
   .btn-sm{padding:6px 12px;font-size:.72rem}
 
-  table{width:100%;border-collapse:collapse;font-size:.82rem}
+  .table-wrap{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  table{width:100%;min-width:540px;border-collapse:collapse;font-size:.82rem}
   th{text-align:left;padding:9px 10px;background:var(--creme);color:var(--text-light);font-size:.68rem;text-transform:uppercase;letter-spacing:.05em}
   td{padding:9px 10px;border-top:1px solid var(--creme-dark)}
   tr.inativo td{color:var(--text-light);opacity:.6}
@@ -79,6 +81,13 @@
   .chip-tipo{display:inline-flex;border-radius:8px;overflow:hidden;border:1px solid var(--creme-dark)}
   .chip-tipo button{padding:8px 16px;border:none;background:var(--white);font-size:.75rem;cursor:pointer;color:var(--text-light)}
   .chip-tipo button.active{background:var(--bordo);color:var(--creme)}
+
+  @media (max-width:600px){
+    header{padding:12px 16px;gap:12px}
+    nav.tabs{padding:0 16px}
+    main{padding:20px 16px 50px}
+    .card{padding:16px}
+  }
 </style>
 </head>
 <body>
@@ -340,7 +349,7 @@ async function renderEquipe(){
         '<h2 style="margin:0">Equipe — '+esc(lojaAtual)+'</h2>'+
         '<button class="btn" onclick="abrirNovoFuncionario()">+ Novo Colaborador</button>'+
       '</div>'+
-      (lista.length ? '<table><thead><tr><th>Nome</th><th>Cargo</th><th>Admissão</th><th>Status</th><th></th></tr></thead><tbody>'+
+      (lista.length ? '<div class="table-wrap"><table><thead><tr><th>Nome</th><th>Cargo</th><th>Admissão</th><th>Status</th><th></th></tr></thead><tbody>'+
         lista.map(f => (
           '<tr class="'+(f.ativo?'':'inativo')+'">'+
             '<td>'+esc(f.nome)+'</td>'+
@@ -352,7 +361,7 @@ async function renderEquipe(){
               (meuPerfil.tipo==='master'?'<button class="btn-danger" onclick=\'excluirFuncionario('+JSON.stringify(f.id)+','+JSON.stringify(f.nome)+')\' title="Excluir (apaga também as entregas/devoluções dele)">🗑️</button>':'')+
             '</td>'+
           '</tr>'
-        )).join('')+'</tbody></table>'
+        )).join('')+'</tbody></table></div>'
       : '<div class="empty">Nenhum colaborador cadastrado nesta loja ainda.</div>')+
     '</div>';
 }
@@ -516,7 +525,7 @@ async function renderItens(){
         '<h2 style="margin:0">Itens de Uniforme (catálogo compartilhado com Pedidos-Fábrica)</h2>'+
         '<button class="btn" onclick="abrirNovoItem()">+ Novo Item</button>'+
       '</div>'+
-      (catalogoUniformes.length ? '<table><thead><tr><th>Nome</th><th>Valor Unit. (R$)</th><th>Status</th><th></th></tr></thead><tbody>'+
+      (catalogoUniformes.length ? '<div class="table-wrap"><table><thead><tr><th>Nome</th><th>Valor Unit. (R$)</th><th>Status</th><th></th></tr></thead><tbody>'+
         catalogoUniformes.map(p => (
           '<tr class="'+(p.ativo?'':'inativo')+'">'+
             '<td>'+esc(p.nome)+'</td>'+
@@ -527,7 +536,7 @@ async function renderItens(){
               '<button class="btn-danger" onclick=\'excluirItem('+JSON.stringify(p.id)+','+JSON.stringify(p.nome)+')\'>🗑️</button>'+
             '</td>'+
           '</tr>'
-        )).join('')+'</tbody></table>'
+        )).join('')+'</tbody></table></div>'
       : '<div class="empty">Nenhum item de uniforme cadastrado.</div>')+
     '</div>';
 }
@@ -591,7 +600,7 @@ async function renderMovimentos(){
         '<h2 style="margin:0">Entregas &amp; Devoluções — '+esc(lojaAtual)+'</h2>'+
         '<button class="btn" onclick="abrirNovoMovimento()">+ Registrar</button>'+
       '</div>'+
-      ((movs&&movs.length) ? '<table><thead><tr><th>Data</th><th>Colaborador</th><th>Tipo</th><th>Itens</th><th>Termo</th><th></th></tr></thead><tbody>'+
+      ((movs&&movs.length) ? '<div class="table-wrap"><table><thead><tr><th>Data</th><th>Colaborador</th><th>Tipo</th><th>Itens</th><th>Termo</th><th></th></tr></thead><tbody>'+
         movs.map(m => (
           '<tr><td>'+new Date(m.data+'T12:00').toLocaleDateString('pt-BR')+'</td>'+
           '<td>'+esc(m.uniformes_funcionarios?.nome||'—')+'</td>'+
@@ -600,7 +609,7 @@ async function renderMovimentos(){
           '<td>'+(m.termo_path?'<button class="btn-outline btn btn-sm" onclick=\'baixarTermo('+JSON.stringify(m.termo_path)+')\'>Ver termo</button>':'<span style="color:var(--text-light);font-size:.75rem">sem arquivo</span>')+'</td>'+
           '<td>'+(meuPerfil.tipo==='master'?'<button class="btn-danger" onclick=\'excluirMovimento('+JSON.stringify(m.id)+','+JSON.stringify(m.termo_path)+')\' title="Excluir registro">🗑️</button>':'')+'</td>'+
           '</tr>'
-        )).join('')+'</tbody></table>'
+        )).join('')+'</tbody></table></div>'
       : '<div class="empty">Nenhum registro ainda.</div>')+
     '</div>';
 
@@ -769,7 +778,7 @@ function renderTabelaInventario(){
         '</div>'+
       '</div>'+
       '<div style="margin-bottom:10px;font-size:.85rem;color:var(--text-light)">Total de peças em posse: <b>'+lista.reduce((s,p)=>s+p.saldo,0)+'</b> — Valor estimado em posse: <b>'+formatarMoeda(valorTotal)+'</b></div>'+
-      (lista.length ? '<table><thead><tr><th>Loja</th><th>Colaborador</th><th>Situação</th><th>Peça</th><th>Qtd.</th><th>Valor</th></tr></thead><tbody>'+
+      (lista.length ? '<div class="table-wrap"><table><thead><tr><th>Loja</th><th>Colaborador</th><th>Situação</th><th>Peça</th><th>Qtd.</th><th>Valor</th></tr></thead><tbody>'+
         lista.map(p => (
           '<tr>'+
             '<td>'+esc(p.loja)+'</td>'+
@@ -779,7 +788,7 @@ function renderTabelaInventario(){
             '<td>'+p.saldo+'</td>'+
             '<td>'+(p.valor_unitario!=null?formatarMoeda(p.valor_unitario*p.saldo):'—')+'</td>'+
           '</tr>'
-        )).join('')+'</tbody></table>'
+        )).join('')+'</tbody></table></div>'
       : '<div class="empty">Nenhuma peça em posse no momento.</div>')+
     '</div>';
 }
@@ -807,7 +816,7 @@ async function renderTriagem(){
     '<div class="card">'+
       '<h2>Recebimento &amp; Triagem de Devoluções</h2>'+
       '<p style="font-size:.82rem;color:var(--text-light);margin-bottom:14px">Peças devolvidas pelas lojas, aguardando avaliação: reaproveitar ou descartar.</p>'+
-      (lista.length ? '<table><thead><tr><th>Data</th><th>Loja</th><th>Colaborador</th><th>Peça</th><th>Qtd.</th><th>Termo</th><th>Destino</th></tr></thead><tbody>'+
+      (lista.length ? '<div class="table-wrap"><table><thead><tr><th>Data</th><th>Loja</th><th>Colaborador</th><th>Peça</th><th>Qtd.</th><th>Termo</th><th>Destino</th></tr></thead><tbody>'+
         lista.map(t => (
           '<tr id="triagem-'+t.entrega_item_id+'">'+
             '<td>'+new Date(t.data+'T12:00').toLocaleDateString('pt-BR')+'</td>'+
@@ -818,7 +827,7 @@ async function renderTriagem(){
             '<td>'+(t.termo_path?'<button class="btn-outline btn btn-sm" onclick=\'baixarTermo('+JSON.stringify(t.termo_path)+')\'>Ver termo</button>':'—')+'</td>'+
             '<td><button class="btn-outline btn btn-sm" onclick=\'abrirTriagem('+JSON.stringify(t.entrega_item_id)+','+JSON.stringify(t.produto_nome)+','+t.quantidade+')\'>Classificar</button></td>'+
           '</tr>'
-        )).join('')+'</tbody></table>'
+        )).join('')+'</tbody></table></div>'
       : '<div class="empty">Nenhuma devolução pendente de triagem no momento.</div>')+
     '</div>';
 }
@@ -903,7 +912,7 @@ async function renderPendencias(){
   el.innerHTML =
     '<div class="card">'+
       '<h2>Peças com Colaboradores — '+esc(lojaAtual)+'</h2>'+
-      (lista.length ? '<table><thead><tr><th>Colaborador</th><th>Situação</th><th>Peça</th><th>Quantidade</th></tr></thead><tbody>'+
+      (lista.length ? '<div class="table-wrap"><table><thead><tr><th>Colaborador</th><th>Situação</th><th>Peça</th><th>Quantidade</th></tr></thead><tbody>'+
         lista.map(p => (
           '<tr>'+
             '<td>'+esc(p.funcionario_nome)+'</td>'+
@@ -911,7 +920,7 @@ async function renderPendencias(){
             '<td>'+esc(p.produto_nome)+'</td>'+
             '<td>'+p.saldo+'</td>'+
           '</tr>'
-        )).join('')+'</tbody></table>'
+        )).join('')+'</tbody></table></div>'
       : '<div class="empty">Nenhuma peça em posse de colaboradores no momento.</div>')+
     '</div>';
 }
